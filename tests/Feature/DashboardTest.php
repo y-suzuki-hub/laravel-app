@@ -1,27 +1,24 @@
 <?php
 
-namespace Tests\Feature;
-
+use App\Models\Book;
+use App\Models\Post;
+use App\Models\ReadingRecord;
 use App\Models\User;
-use Illuminate\Foundation\Testing\RefreshDatabase;
-use Tests\TestCase;
 
-class DashboardTest extends TestCase
-{
-    use RefreshDatabase;
+it('redirects guests to the login page', function () {
+    $this->get('/dashboard')->assertRedirect('/login');
+});
 
-    public function test_guests_are_redirected_to_the_login_page(): void
-    {
-        $response = $this->get('/dashboard');
-        $response->assertRedirect('/login');
-    }
+it('shows books I am reading and recent posts', function () {
+    $user = User::factory()->create();
+    ReadingRecord::factory()->for($user)->for(Book::factory()->state(['title' => '今読んでいる本']))->reading()->create();
+    ReadingRecord::factory()->for($user)->for(Book::factory()->state(['title' => '積読の本']))->create();
+    Post::factory()->count(3)->create();
+    Post::factory()->create(['body' => '最新の感想']);
 
-    public function test_authenticated_users_can_visit_the_dashboard(): void
-    {
-        $user = User::factory()->create();
-        $this->actingAs($user);
-
-        $response = $this->get('/dashboard');
-        $response->assertStatus(200);
-    }
-}
+    $this->actingAs($user)->get('/dashboard')
+        ->assertOk()
+        ->assertSee('今読んでいる本')
+        ->assertDontSee('積読の本')
+        ->assertSee('最新の感想');
+});
