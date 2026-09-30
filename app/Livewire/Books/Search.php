@@ -71,7 +71,10 @@ class Search extends Component
     {
         $status = ReadingStatus::tryFrom($status) ?? abort(422);
 
-        $data = app(GoogleBooksClient::class)->find($googleBooksId) ?? abort(404);
+        // 画面に表示した検索結果（キャッシュ済み）をそのまま保存する。見つからない場合だけ API から取得し直す
+        $data = $this->results?->firstWhere('googleBooksId', $googleBooksId)
+            ?? app(GoogleBooksClient::class)->find($googleBooksId)
+            ?? abort(404);
 
         $book = Book::fromBookData($data);
 
