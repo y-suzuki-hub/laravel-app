@@ -190,11 +190,11 @@ erDiagram
 |---|---|---|---|
 | トップ（未ログイン） | `/` | 不要 | Blade |
 | ログイン / 登録 など | `/login` `/register` … | 不要 | スターターキット |
-| タイムライン | `/home` | 必要 | Livewire |
+| ホーム（Phase 1: 読書中の本・新着の感想 → Phase 2: タイムライン） | `/dashboard` | 必要 | Livewire |
 | 書籍検索 | `/books/search` | 必要 | Livewire（入力に応じてリアルタイム検索） |
 | 書籍詳細（感想一覧） | `/books/{book}` | 不要 | Livewire |
 | 自分の本棚 | `/shelf` | 必要 | Livewire（ステータスのタブ切替） |
-| 投稿作成 | `/posts/create?book={book}` | 必要 | Livewire |
+| 投稿作成 | `/books/{book}/posts/create` | 必要 | Livewire |
 | 投稿詳細 | `/posts/{post}` | 不要 | Livewire（いいね・コメント） |
 | 投稿編集 | `/posts/{post}/edit` | 必要（本人のみ） | Livewire |
 | タグ別一覧 | `/tags/{tag:name}` | 不要 | Livewire |

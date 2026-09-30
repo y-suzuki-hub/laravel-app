@@ -26,7 +26,9 @@ class ProfileUpdateTest extends TestCase
 
         $response = Volt::test('settings.profile')
             ->set('name', 'Test User')
+            ->set('username', 'new_name')
             ->set('email', 'test@example.com')
+            ->set('bio', '技術書をよく読みます。')
             ->call('updateProfileInformation');
 
         $response->assertHasNoErrors();
@@ -34,7 +36,9 @@ class ProfileUpdateTest extends TestCase
         $user->refresh();
 
         $this->assertEquals('Test User', $user->name);
+        $this->assertEquals('new_name', $user->username);
         $this->assertEquals('test@example.com', $user->email);
+        $this->assertEquals('技術書をよく読みます。', $user->bio);
         $this->assertNull($user->email_verified_at);
     }
 

@@ -8,7 +8,9 @@ use Livewire\Volt\Component;
 
 new class extends Component {
     public string $name = '';
+    public string $username = '';
     public string $email = '';
+    public string $bio = '';
 
     /**
      * Mount the component.
@@ -16,7 +18,9 @@ new class extends Component {
     public function mount(): void
     {
         $this->name = Auth::user()->name;
+        $this->username = Auth::user()->username;
         $this->email = Auth::user()->email;
+        $this->bio = Auth::user()->bio ?? '';
     }
 
     /**
@@ -29,6 +33,8 @@ new class extends Component {
         $validated = $this->validate([
             'name' => ['required', 'string', 'max:255'],
 
+            'username' => User::usernameRules(ignore: $user),
+
             'email' => [
                 'required',
                 'string',
@@ -37,6 +43,8 @@ new class extends Component {
                 'max:255',
                 Rule::unique(User::class)->ignore($user->id)
             ],
+
+            'bio' => ['nullable', 'string', 'max:500'],
         ]);
 
         $user->fill($validated);
@@ -72,9 +80,11 @@ new class extends Component {
 <section class="w-full">
     @include('partials.settings-heading')
 
-    <x-settings.layout heading="Profile" subheading="Update your name and email address">
+    <x-settings.layout heading="Profile" subheading="Update your name, username, email address and bio">
         <form wire:submit="updateProfileInformation" class="my-6 w-full space-y-6">
             <flux:input wire:model="name" label="{{ __('Name') }}" type="text" name="name" required autofocus autocomplete="name" />
+
+            <flux:input wire:model="username" label="{{ __('Username') }}" description="半角英小文字・数字・_ で 3〜20 文字" type="text" name="username" required autocomplete="username" />
 
             <div>
                 <flux:input wire:model="email" label="{{ __('Email') }}" type="email" name="email" required autocomplete="email" />
@@ -100,6 +110,8 @@ new class extends Component {
                     </div>
                 @endif
             </div>
+
+            <flux:textarea wire:model="bio" label="自己紹介" description="500 文字まで" rows="4" name="bio" />
 
             <div class="flex items-center gap-4">
                 <div class="flex items-center justify-end">

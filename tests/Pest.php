@@ -29,10 +29,6 @@ pest()->extend(TestCase::class)
 |
 */
 
-expect()->extend('toBeOne', function () {
-    return $this->toBe(1);
-});
-
 /*
 |--------------------------------------------------------------------------
 | Functions
@@ -44,7 +40,28 @@ expect()->extend('toBeOne', function () {
 |
 */
 
-function something()
+/**
+ * Google Books API の volume リソースのダミー。
+ *
+ * @param  array<string, mixed>  $volumeInfo
+ * @return array<string, mixed>
+ */
+function googleBooksVolume(string $id = 'vol123', array $volumeInfo = []): array
 {
-    // ..
+    return [
+        'id' => $id,
+        'volumeInfo' => array_merge([
+            'title' => 'リーダブルコード',
+            'authors' => ['Dustin Boswell', 'Trevor Foucher'],
+            'publisher' => 'オライリージャパン',
+            'publishedDate' => '2012-06-23',
+            'description' => '<p>より良いコードを書くための<b>シンプルで実践的な</b>テクニック</p>',
+            'industryIdentifiers' => [
+                ['type' => 'ISBN_10', 'identifier' => '4873115655'],
+                ['type' => 'ISBN_13', 'identifier' => '9784873115658'],
+            ],
+            'pageCount' => 237,
+            'imageLinks' => ['thumbnail' => 'http://books.google.com/books/content?id='.$id],
+        ], $volumeInfo),
+    ];
 }
