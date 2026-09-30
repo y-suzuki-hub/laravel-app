@@ -273,11 +273,19 @@ flowchart LR
 | Route 53 + Let's Encrypt | 独自ドメインと HTTPS 化（ALB を使わない分、証明書は EC2 上で発行） | - |
 | AWS Budgets | 予算アラート（想定額を超えたらメール） | - |
 
+**導入の順番**: まず EC2・RDS・Parameter Store・GitHub Actions でアプリを公開する（Step 1a）。
+S3（画像）・SQS・SES は、それを使う機能（Phase 3 のアバター画像・通知メール）と合わせて導入する（Step 1b）。
+独自ドメインと HTTPS も Step 1b で行う。構築手順は [docs/aws/step1-deploy.md](aws/step1-deploy.md)。
+
 **デプロイの流れ（GitHub Actions）**
 
 1. main ブランチにマージされたらテストを実行
-2. OIDC で AWS の IAM ロールを引き受ける（アクセスキー不要）
-3. SSM Run Command で EC2 上のデプロイスクリプトを実行（`git pull` → `composer install --no-dev` → `php artisan migrate --force` → キャッシュ再生成 → `queue:restart`）
+2. GitHub Actions 上で `composer install --no-dev` と `npm run build` を行い、リリース用の tar.gz を作る（EC2 でビルドしないので、メモリの小さいインスタンスで済む）
+3. OIDC で AWS の IAM ロールを引き受け（アクセスキー不要）、tar.gz を S3 にアップロード
+4. SSM Run Command で EC2 に指示し、`releases/<コミット>` に展開 → `.env` を生成 → `migrate --force` → `optimize` → `current` のシンボリックリンクを切り替え
+5. `/up` でヘルスチェックし、失敗したら直前のリリースに戻す
+
+サーバーのセットアップ（Nginx・PHP-FPM・Supervisor・cron）は `deploy/server/provision.sh` にまとめ、内容が変わったときだけデプロイ時に自動で再実行する。
 
 ### Step 2: Terraform でコード化する
 
