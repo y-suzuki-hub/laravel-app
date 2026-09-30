@@ -1,0 +1,123 @@
+name: deploy
+
+# main へのプッシュ（プルリクエストのマージ）で本番環境にデプロイする。
+# Actions タブから手動でも実行できる。
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  tests:
+    uses: ./.github/workflows/tests.yml
+
+  deploy:
+    needs: tests
+    runs-on: ubuntu-latest
+    environment: production
+    permissions:
+      contents: read
+      id-token: write # OIDC で AWS の IAM ロールを引き受けるために必要
+    env:
+      RELEASE: ${{ github.sha }}
+      AWS_INSTANCE_ID: ${{ vars.AWS_INSTANCE_ID }}
+      DEPLOY_BUCKET: ${{ vars.DEPLOY_BUCKET }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: 8.4
+          tools: composer:v2
+          coverage: none
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install PHP dependencies
+        run: composer install --no-dev --no-interaction --prefer-dist --optimize-autoloader --no-progress
+
+      - name: Build assets
+        run: |
+          npm ci
+          npm run build
+
+      - name: Package release
+        run: |
+          tar -czf "/tmp/${RELEASE}.tgz" \
+            --exclude-vcs \
+            --exclude=./.github \
+            --exclude=./node_modules \
+            --exclude=./tests \
+            --exclude=./storage \
+            --exclude=./.env \
+            --exclude='./database/*.sqlite' \
+            .
+          ls -lh "/tmp/${RELEASE}.tgz"
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Upload release to S3
+        run: aws s3 cp "/tmp/${RELEASE}.tgz" "s3://${DEPLOY_BUCKET}/releases/${RELEASE}.tgz"
+
+      - name: Activate release on EC2
+        run: |
+          RELEASE_DIR="/var/www/readlog/releases/${RELEASE}"
+          # 初回はまだ EC2 に AWS CLI がないため、期限付きの URL を発行して curl でダウンロードさせる
+          DOWNLOAD_URL=$(aws s3 presign "s3://${DEPLOY_BUCKET}/releases/${RELEASE}.tgz" --expires-in 900)
+          SCRIPT=$(cat <<SCRIPT
+          set -e
+          mkdir -p ${RELEASE_DIR}
+          curl -fsS -o /tmp/${RELEASE}.tgz '${DOWNLOAD_URL}'
+          tar -xzf /tmp/${RELEASE}.tgz -C ${RELEASE_DIR}
+          rm -f /tmp/${RELEASE}.tgz
+          bash ${RELEASE_DIR}/deploy/server/activate.sh ${RELEASE_DIR}
+          SCRIPT
+          )
+
+          COMMAND_ID=$(aws ssm send-command \
+            --instance-ids "$AWS_INSTANCE_ID" \
+            --document-name AWS-RunShellScript \
+            --comment "deploy ${RELEASE}" \
+            --parameters "$(jq -n --arg script "$SCRIPT" '{commands: [$script], executionTimeout: ["1800"]}')" \
+            --query Command.CommandId \
+            --output text)
+          echo "SSM command: $COMMAND_ID"
+
+          # 初回はサーバーのセットアップを含むため数分かかる
+          for _ in $(seq 1 120); do
+            sleep 10
+            STATUS=$(aws ssm get-command-invocation --command-id "$COMMAND_ID" --instance-id "$AWS_INSTANCE_ID" \
+              --query Status --output text 2>/dev/null || echo Pending)
+            echo "status: $STATUS"
+            case "$STATUS" in
+              Pending|InProgress|Delayed) continue ;;
+              *) break ;;
+            esac
+          done
+
+          aws ssm get-command-invocation --command-id "$COMMAND_ID" --instance-id "$AWS_INSTANCE_ID" \
+            --query StandardOutputContent --output text
+          echo "---- stderr ----"
+          aws ssm get-command-invocation --command-id "$COMMAND_ID" --instance-id "$AWS_INSTANCE_ID" \
+            --query StandardErrorContent --output text
+
+          test "$STATUS" = "Success"

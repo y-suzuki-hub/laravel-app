@@ -1,0 +1,25 @@
+{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Sid": "ReadAppParameters",
+            "Effect": "Allow",
+            "Action": "ssm:GetParametersByPath",
+            "Resource": [
+                "arn:aws:ssm:ap-northeast-1:ACCOUNT_ID:parameter/readlog/production",
+                "arn:aws:ssm:ap-northeast-1:ACCOUNT_ID:parameter/readlog/production/*"
+            ]
+        },
+        {
+            "Sid": "DecryptSecureStrings",
+            "Effect": "Allow",
+            "Action": "kms:Decrypt",
+            "Resource": "*",
+            "Condition": {
+                "StringEquals": {
+                    "kms:ViaService": "ssm.ap-northeast-1.amazonaws.com"
+                }
+            }
+        }
+    ]
+}
