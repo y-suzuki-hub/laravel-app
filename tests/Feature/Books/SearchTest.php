@@ -70,6 +70,18 @@ it('adds a book to the shelf', function () {
         ->started_on->not->toBeNull();
 });
 
+it('saves the book exactly as shown in the search results', function () {
+    Livewire::actingAs($this->user)
+        ->test(Search::class)
+        ->set('keyword', 'リーダブル')
+        ->call('addToShelf', 'vol1');
+
+    expect(Book::sole()->thumbnail_url)->toBe('https://books.google.com/books/content?id=vol1');
+
+    // 検索結果から保存したので、1 冊分の詳細 API は呼んでいない
+    Http::assertNotSent(fn ($request) => str_contains($request->url(), '/volumes/vol1'));
+});
+
 it('does not duplicate a book already on the shelf', function () {
     $component = Livewire::actingAs($this->user)->test(Search::class);
 
