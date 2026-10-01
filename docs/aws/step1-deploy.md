@@ -246,7 +246,8 @@ SSH（22）は**追加しない**。アウトバウンドはそのまま（す�
 
 作成したロールを開いて、次の 2 つを設定する。
 
-1. **「信頼関係」→「信頼ポリシーを編集」**: [`deploy/aws/github-trust-policy.json`](../../deploy/aws/github-trust-policy.json) の内容に置き換え、`ACCOUNT_ID` を自分の値にする。
+1. **「信頼関係」→「信頼ポリシーを編集」**: [`deploy/aws/github-trust-policy.json`](../../deploy/aws/github-trust-policy.json) の内容に置き換え、`ACCOUNT_ID` を自分の値にする。`OWNER_ID` と `REPO_ID` は GitHub のオーナーとリポジトリの数値 ID（`https://api.github.com/repos/y-suzuki-hub/laravel-app` を開くと `owner.id` と `id` で分かる）。
+   GitHub の OIDC トークンの subject は `repo:オーナー@オーナーID/リポジトリ@リポジトリID:environment:production` の形式で届くため、ID が必要になる（古い形式も念のため許可している）。
    これで「このリポジトリの `production` 環境のジョブ」だけがロールを使えるようになる。
 2. **「許可を追加」→「インラインポリシーを作成」→「JSON」**: [`deploy/aws/github-deploy-policy.json`](../../deploy/aws/github-deploy-policy.json) を貼り付け、`ACCOUNT_ID`・`BUCKET_NAME`・`INSTANCE_ID` を置き換えて `readlog-github-deploy` という名前で作成する。
 
@@ -293,7 +294,7 @@ main を作った時点で「Actions」タブの **deploy** ワークフロー�
 
 | 症状 | 確認すること |
 |---|---|
-| `Configure AWS credentials` で失敗 | 信頼ポリシーの `ACCOUNT_ID`、GitHub の環境名が `production` か、ジョブが main から実行されているか |
+| `Configure AWS credentials` で失敗 | 「Show OIDC subject」ステップに表示される `sub` と、信頼ポリシーの `sub` が完全に一致しているか。GitHub の環境名が `production`（小文字）か、ジョブが main から実行されているか |
 | `Upload release to S3` で AccessDenied | デプロイ用ポリシーの `BUCKET_NAME` |
 | `Activate release on EC2` で `InvalidInstanceId` | インスタンス ID、EC2 が起動中か、Session Manager で接続できるか（SSM に登録されているか） |
 | サーバー側のエラー | ワークフローのログに出るサーバーの出力。`Systems Manager`→`Run Command`→`コマンド履歴` でも確認できる |

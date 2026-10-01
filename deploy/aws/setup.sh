@@ -304,7 +304,11 @@ if ! aws iam get-open-id-connect-provider --open-id-connect-provider-arn "$OIDC_
 fi
 
 GITHUB_ROLE=${APP}-github-deploy
-TRUST_POLICY=$(sed -e "s/ACCOUNT_ID/$ACCOUNT_ID/g" -e "s#y-suzuki-hub/laravel-app#$GITHUB_REPO#g" "$SCRIPT_DIR/github-trust-policy.json")
+# GitHub の OIDC トークンの subject は「repo:オーナー@オーナーID/リポジトリ@リポジトリID:...」の形式なので、ID を GitHub API から取得する
+GITHUB_IDS=$(curl -fsS "https://api.github.com/repos/$GITHUB_REPO" | jq -r '"\(.owner.id) \(.id)"')
+read -r GITHUB_OWNER_ID GITHUB_REPO_ID <<<"$GITHUB_IDS"
+info "GitHub: $GITHUB_REPO（オーナー ID $GITHUB_OWNER_ID / リポジトリ ID $GITHUB_REPO_ID）"
+TRUST_POLICY=$(sed -e "s/ACCOUNT_ID/$ACCOUNT_ID/g" -e "s/OWNER_ID/$GITHUB_OWNER_ID/g" -e "s/REPO_ID/$GITHUB_REPO_ID/g" "$SCRIPT_DIR/github-trust-policy.json")
 if ! aws iam get-role --role-name "$GITHUB_ROLE" >/dev/null 2>&1; then
     aws iam create-role --role-name "$GITHUB_ROLE" --assume-role-policy-document "$TRUST_POLICY" >/dev/null
     info "作成: $GITHUB_ROLE"
