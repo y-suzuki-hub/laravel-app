@@ -49,6 +49,32 @@ flowchart LR
 2. **普段使う管理者ユーザーを作る**: ルートユーザーでは作業しない。IAM Identity Center（推奨）か、IAM ユーザーに `AdministratorAccess` を付けて MFA を設定し、以降はそのユーザーでログインする。
 3. **予算アラートを設定する**: 「Billing and Cost Management」→「予算」→「予算を作成」→ テンプレート「月次コスト予算」で、例えば 40 USD、通知先に自分のメールアドレスを設定する。
 
+## かんたんな方法: CloudShell で手順 1〜8 をまとめて作る（推奨）
+
+手順 1〜8 は、AWS CloudShell でスクリプトを実行すれば自動で作れる。リージョンは東京に固定してあり、何度実行しても同じリソースを再利用する（途中で止まったらもう一度実行すれば良い）。
+
+1. 手順 0（事前準備）を済ませる
+2. AWS コンソールの左下（または上部）の **CloudShell** アイコンを押してターミナルを開く
+3. 次を実行する
+
+   ```bash
+   git clone https://github.com/y-suzuki-hub/laravel-app.git
+   cd laravel-app
+   git checkout claude/youthful-goodall-9t0bxq   # main ができたら不要
+   bash deploy/aws/setup.sh
+   ```
+
+4. 最初に **RDS のマスターパスワード**（自分で決める。2 回入力）と **Google Books の API キー** を聞かれる。入力は画面に表示されない
+5. RDS の作成を待つため、終わるまで **15 分ほど** かかる。CloudShell は操作がないと 20〜30 分で切れることがあるので、切れたら同じコマンドをもう一度実行する
+6. 最後に表示される 4 つの値を、手順 9 で GitHub に登録する
+
+作られるものは手順 1〜8 と同じ（VPC・セキュリティグループ・S3・IAM ロール・RDS・EC2・Elastic IP・Parameter Store・GitHub 用ロール）。
+コンソールで先に作った `readlog-ec2-role` や東京の `readlog-deploy-...` バケットはそのまま使われる。
+
+全部削除するときは `bash deploy/aws/teardown.sh`（`delete` と入力して確定）。
+
+以下の手順 1〜8 は、コンソールで手作業で作る場合の手順（スクリプトが何をしているかの説明にもなる）。
+
 ## 1. VPC（ネットワーク）
 
 「VPC」→「VPC を作成」→ **「VPC など」** を選ぶ。
@@ -290,7 +316,7 @@ main を作った時点で「Actions」タブの **deploy** ワークフロー�
 ## 後片付け・節約
 
 - **一時的に止める**: EC2 を「停止」、RDS を「一時停止」。RDS は 7 日経つと自動で起動するので注意。Elastic IP は EC2 を停止していても課金される。
-- **全部消す**: EC2 を終了 → Elastic IP を解放 → RDS を削除（最終スナップショットは任意）→ S3 バケットを空にして削除 → VPC を削除 → IAM ロール・Parameter Store のパラメータを削除。
+- **全部消す**: CloudShell で `bash deploy/aws/teardown.sh`。手作業なら EC2 を終了 → Elastic IP を解放 → RDS を削除（最終スナップショットは任意）→ S3 バケットを空にして削除 → VPC を削除 → IAM ロール・Parameter Store のパラメータを削除。
 
 ## 次のステップ
 
