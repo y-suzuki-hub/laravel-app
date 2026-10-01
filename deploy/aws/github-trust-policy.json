@@ -10,7 +10,10 @@
             "Condition": {
                 "StringEquals": {
                     "token.actions.githubusercontent.com:aud": "sts.amazonaws.com",
-                    "token.actions.githubusercontent.com:sub": "repo:y-suzuki-hub/laravel-app:environment:production"
+                    "token.actions.githubusercontent.com:sub": [
+                        "repo:y-suzuki-hub@OWNER_ID/laravel-app@REPO_ID:environment:production",
+                        "repo:y-suzuki-hub/laravel-app:environment:production"
+                    ]
                 }
             }
         }
