@@ -3,6 +3,7 @@
 Laravel + Livewire で作る読書記録 SNS（学習・ポートフォリオ用）。
 
 - 設計書: [docs/design.md](docs/design.md)
+- Laravel の仕組みの読み方ガイド: [docs/laravel-guide.md](docs/laravel-guide.md)
 - AWS へのデプロイ手順: [docs/aws/step1-deploy.md](docs/aws/step1-deploy.md)
 
 ## 機能（Phase 1）
