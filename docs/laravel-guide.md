@@ -92,7 +92,16 @@ Route::middleware(['auth', 'verified'])->group(function () {
 - `->name('books.search')` … このルートに名前を付ける。画面側では `route('books.search')` と書けば URL が作られる（URL を変えても名前で参照している箇所は直さなくて良い）
 - `Route::middleware(['auth', ...])->group(...)` … 中のルートは**ログインしていないと使えない**。ログインしていなければ自動でログイン画面に飛ばされる（この仕組みを**ミドルウェア**と呼ぶ）
 
-> **試してみる**: ターミナルで `php artisan route:list --except-vendor` を実行すると、アプリの全 URL の一覧が出る。ログアウトした状態で http://localhost:8000/books/search を開き、ログイン画面に飛ばされることも確認する。
+> **試してみる**: URL の一覧と、それぞれにかかっているチェック（ミドルウェア）を見てから、実際にアクセスして確かめる。
+>
+> 1. ターミナルで `php artisan route:list -v --path=books` を実行する（`-v` でミドルウェアも表示、`--path=books` で URL に `books` を含むものだけに絞る）
+>    - `books/search` には `Authenticate`（ログインしているかの確認）が付いている
+>    - `books/{book}`（書籍ページ）には付いていない
+> 2. ブラウザでログアウトする
+> 3. http://localhost:8000/books/search を開く → **ログイン画面に飛ばされる**（`Authenticate` があるため）
+> 4. http://localhost:8000/books/1 を開く → **そのまま見られる**（`Authenticate` がないため）
+>
+> この違いは、`routes/web.php` で `Route::middleware(['auth', ...])->group(...)` の**中に書いたか外に書いたか**で決まっている。
 
 ### 2-2. 画面の処理 — `app/Livewire/Books/Search.php`
 
