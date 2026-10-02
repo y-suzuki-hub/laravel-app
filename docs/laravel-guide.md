@@ -1,338 +1,455 @@
 # ReadLog で学ぶ Laravel の仕組み
 
-このガイドは、自分のアプリ（ReadLog）のコードを読みながら、Laravel がどう動いているかをつかむためのもの。
-「本を検索して本棚に追加する」という 1 つの操作を、最初から最後まで追いかける。
+自分のアプリ（ReadLog）を使って、Laravel がどう動いているかをつかむためのガイド。
+「**本を検索して、本棚に追加する**」という 1 つの操作の裏側を、順番にのぞいていく。
 
-## 読み方
+## このガイドの読み方
 
-- PC で `laravel-app` フォルダをエディタ（VS Code など）で開き、**ガイドと実際のファイルを並べて**読む
-- VS Code なら `⌘ + P` でファイル名を入力するとすぐ開ける。`app/Livewire/Books/Search.php:70` のように書いてあるのは「70 行目」の意味
-- 途中にある「**試してみる**」は、実際に手を動かすと理解が一気に進むので、なるべくやる
-- 全部を一度に理解しなくて良い。1 章ずつ、分からない言葉は最後の「用語集」を見る
+- 各章は同じ順番で書いてある
+  1. **たとえ** … まず身近なものに置き換えてイメージをつかむ
+  2. **コードのどこか** … 実際のファイルと行番号
+  3. **なぜこう書くのか** … この書き方だと何がうれしいのか
+  4. **試してみる** … 手を動かして確かめる（ここが一番大事）
+- PC の VS Code で `laravel-app` フォルダを開き、ガイドとコードを並べて読む。`⌘ + P` でファイル名を入れるとすぐ開ける
+- `routes/web.php:17` と書いてあったら「`routes/web.php` の 17 行目」のこと
+- 試すときは `composer run dev` でアプリを起動しておく。コードを書き換えて試したら、最後に `git checkout .` で元に戻せる
+- 一度に全部わからなくて大丈夫。1 章ずつ進める
 
 ---
 
-## 1. 全体の地図
+## 1章 全体像 — Laravel は「レストラン」
 
-### フォルダの役割
+### たとえ
 
-Laravel のプロジェクトはファイルが多いが、**普段触るのは次の 5 か所だけ**。
+ブラウザで ReadLog を使うことを、レストランで注文することにたとえる。
 
-| フォルダ | 役割 | ReadLog での例 |
+| レストラン | Laravel | フォルダ |
 |---|---|---|
-| `routes/` | **URL と処理の対応表**。「この URL に来たら、この処理を動かす」 | `routes/web.php` |
-| `app/Livewire/` | **画面ごとの処理**（PHP）。ボタンが押されたら何をするか | `app/Livewire/Books/Search.php` |
-| `app/Models/` | **データベースのテーブルを PHP で扱うクラス**（Eloquent モデル） | `app/Models/Book.php` |
-| `resources/views/` | **画面の見た目**（HTML + Blade） | `resources/views/livewire/books/search.blade.php` |
-| `database/migrations/` | **テーブルの設計図**。どんな列を持つか | `database/migrations/2026_09_30_000002_create_reading_records_table.php` |
+| 入口の**案内係**。「本を探したい」と言われたら、担当のテーブルに案内する | **ルート** — URL を見て、どの処理に回すか決める | `routes/` |
+| 入口の**会員証チェック**。会員以外は入れない | **ミドルウェア** — ログインしていない人をログイン画面に帰す | `routes/web.php` の中 |
+| **ホール係**。注文を聞いて、倉庫係に材料を頼み、料理を出す | **Livewire コンポーネント** — 画面の処理を担当する | `app/Livewire/` |
+| **倉庫係**。倉庫から材料を出し入れする | **モデル** — データベースの読み書きを担当する | `app/Models/` |
+| **倉庫** | **データベース** — 本や本棚のデータが入っている | （SQLite / MySQL） |
+| 倉庫の**棚の設計図** | **マイグレーション** — どんな表（テーブル）を作るか | `database/migrations/` |
+| **お皿と盛り付け** | **ビュー** — 画面の見た目（HTML） | `resources/views/` |
+| 「**これはあなたの注文ですか？**」の確認 | **Policy** — 他人のデータを操作させない | `app/Policies/` |
 
-ほかにも次のフォルダがある（たまに触る）。
-
-| フォルダ | 役割 |
-|---|---|
-| `app/Policies/` | 「この人はこのデータを操作して良いか」の判定（認可） |
-| `app/Enums/` | 決まった選択肢（読書ステータスなど）の定義 |
-| `app/Services/` | 外部 API との通信など、画面に依存しない処理 |
-| `tests/` | 自動テスト |
-| `config/` | 設定。値の多くは `.env` から読む |
-| `vendor/` | Laravel 本体などのライブラリ（**自分では編集しない**） |
-
-### リクエストの流れ
-
-ブラウザで URL を開いてから画面が表示されるまでの流れ。
+### 流れ
 
 ```mermaid
 flowchart LR
-    B[ブラウザ] -->|1. /books/search を開く| R[routes/web.php<br/>URL の対応表]
-    R -->|2. ログイン確認<br/>ミドルウェア| C[app/Livewire/Books/Search.php<br/>画面の処理]
-    C -->|3. データが必要なら| M[app/Models/*<br/>モデル]
-    M <-->|SQL| DB[(データベース)]
-    C -->|4. 表示する| V[resources/views/livewire/books/search.blade.php<br/>見た目]
-    V -->|5. HTML| B
+    B[ブラウザ] -->|URL を開く| R[ルート<br/>案内係]
+    R -->|ログインしてる？| C[Livewire コンポーネント<br/>ホール係]
+    C <-->|データを出し入れ| M[モデル<br/>倉庫係]
+    M <--> DB[(データベース<br/>倉庫)]
+    C -->|盛り付け| V[ビュー<br/>お皿]
+    V -->|画面| B
 ```
 
-### Livewire が加えるもの
-
-ふつうの Laravel では「ボタンを押す → ページ全体を読み込み直す」。
-Livewire を使うと、**ボタンを押したときに裏で PHP のメソッドが呼ばれ、画面の一部だけが書き換わる**。
-
-```mermaid
-sequenceDiagram
-    participant B as ブラウザ
-    participant L as Livewire（PHP）
-    B->>L: 最初の表示（ページ全体の HTML）
-    Note over B: 「本棚に追加」をクリック
-    B->>L: 裏で通信: addToShelf('vol1', 'reading') を呼んで
-    L->>L: Search.php の addToShelf() を実行
-    L-->>B: 変わった部分の HTML だけ返す
-    Note over B: ボタンが「読んでいる」バッジに変わる
-```
-
-JavaScript をほとんど書かずに、PHP だけで動きのある画面を作れるのが Livewire の特徴。
+これから「本を本棚に追加する」操作で、この順番に登場人物を見ていく。
 
 ---
 
-## 2. 「本棚に追加」を追いかける
+## 2章 ルート — URL の案内係
 
-ここからが本題。画面で「本を探す」→ キーワード入力 →「本棚に追加」→「読んでいる」を選ぶ、という操作の裏側を順番に見る。
+### たとえ
 
-### 2-1. URL を受け付ける — `routes/web.php`
+ルートは「**この URL に来た人は、この担当に回す**」という**案内表**。
+
+### コードのどこか
+
+`routes/web.php:17`
 
 ```php
-// routes/web.php:14-17
+Route::livewire('books/search', Books\Search::class)->name('books.search');
+//               ↑ この URL に来たら  ↑ この担当（画面の処理）に回す   ↑ 名前（あだ名）
+```
+
+http://localhost:8000/books/search を開くと、`app/Livewire/Books/Search.php` が担当になる。
+
+### URL に名前を付ける理由
+
+**スマホの連絡帳と同じ**。
+
+- 電話番号 `090-1234-5678` ＝ 実際の URL `/books/search`
+- 登録名「田中さん」＝ ルートの名前 `books.search`
+
+画面にリンクを作るときは、URL を直接書かずに名前で呼ぶ。
+
+```blade
+{{-- 左のメニュー resources/views/components/layouts/app/sidebar.blade.php:18 --}}
+<flux:navlist.item :href="route('books.search')" ...>本を探す</flux:navlist.item>
+
+{{-- 本棚画面のボタン resources/views/livewire/shelf/index.blade.php:4 --}}
+<flux:button :href="route('books.search')" ...>本を探す</flux:button>
+```
+
+`route('books.search')` は、案内表を見て `/books/search` に置き換えてくれる。
+URL を `/search` に変えたくなっても、`routes/web.php` の 1 か所を直すだけで、全部のリンクが新しい URL になる。
+URL を直接書いていたら、リンクを書いた場所を全部探して直す必要がある（ReadLog では 4 か所）。
+
+> **試してみる**
+> 1. `routes/web.php:17` の `'books/search'` を `'search'` に変えて保存する
+> 2. ブラウザで左のメニューの「本を探す」を押す → アドレスバーが `/search` になり、ちゃんと開ける
+> 3. 確認したら `'books/search'` に戻す
+
+### 会員証チェック（ミドルウェア）
+
+`routes/web.php:14-22`
+
+```php
 Route::middleware(['auth', 'verified'])->group(function () {
-    Route::livewire('dashboard', Dashboard::class)->name('dashboard');
+    Route::livewire('books/search', ...);     // ← この中 → ログインが必要
+    Route::livewire('shelf', ...);
+    // ...
+});
 
-    Route::livewire('books/search', Books\Search::class)->name('books.search');
+Route::livewire('books/{book}', ...);         // ← 外 → 誰でも見られる（25 行目）
 ```
 
-読み方:
+`Route::middleware(['auth'])->group(...)` の**中に書いた URL は、入口で会員証（ログイン）をチェック**される。ログインしていない人はログイン画面に帰される。
+書籍ページ（`books/{book}`）は外に書いてあるので、ログインしていなくても見られる。
 
-- `Route::livewire('books/search', Books\Search::class)` … **`/books/search` にアクセスが来たら、`Search` という Livewire コンポーネントを表示する**
-- `->name('books.search')` … このルートに名前を付ける。画面側では `route('books.search')` と書けば URL が作られる（URL を変えても名前で参照している箇所は直さなくて良い）
-- `Route::middleware(['auth', ...])->group(...)` … 中のルートは**ログインしていないと使えない**。ログインしていなければ自動でログイン画面に飛ばされる（この仕組みを**ミドルウェア**と呼ぶ）
+> **試してみる**
+> 1. ターミナルで `php artisan route:list -v --path=books` を実行する。各 URL の下に、かかっているチェックが表示される
+>    - `books/search` の下には `Authenticate`（ログインのチェック）がある
+>    - `books/{book}` の下にはない
+> 2. ブラウザでログアウトする（左下のユーザー名 → Log Out）
+> 3. http://localhost:8000/books/search を開く → ログイン画面に飛ばされる
+> 4. http://localhost:8000/books/1 を開く → そのまま見られる
 
-> **試してみる**: URL の一覧と、それぞれにかかっているチェック（ミドルウェア）を見てから、実際にアクセスして確かめる。
->
-> 1. ターミナルで `php artisan route:list -v --path=books` を実行する（`-v` でミドルウェアも表示、`--path=books` で URL に `books` を含むものだけに絞る）
->    - `books/search` には `Authenticate`（ログインしているかの確認）が付いている
->    - `books/{book}`（書籍ページ）には付いていない
-> 2. ブラウザでログアウトする
-> 3. http://localhost:8000/books/search を開く → **ログイン画面に飛ばされる**（`Authenticate` があるため）
-> 4. http://localhost:8000/books/1 を開く → **そのまま見られる**（`Authenticate` がないため）
->
-> この違いは、`routes/web.php` で `Route::middleware(['auth', ...])->group(...)` の**中に書いたか外に書いたか**で決まっている。
+---
 
-### 2-2. 画面の処理 — `app/Livewire/Books/Search.php`
+## 3章 Livewire コンポーネントとビュー — ホール係とお皿
 
-Livewire コンポーネントは、**画面の状態（プロパティ）** と **画面から呼べる操作（メソッド）** を持つクラス。
+### たとえ
+
+ホール係（コンポーネント）は**メモ帳**を持っていて、お客さんの注文（入力したキーワードなど）を書き留める。
+メモ帳の内容が変わると、すぐに料理（画面）を作り直して出し直す。
+
+ReadLog の「本を探す」画面は、次の 2 つのファイルでできている。
+
+| ファイル | 役割 |
+|---|---|
+| `app/Livewire/Books/Search.php` | ホール係（PHP）。メモ帳と、ボタンが押されたときの処理 |
+| `resources/views/livewire/books/search.blade.php` | お皿（HTML）。画面の見た目 |
+
+### メモ帳（プロパティ）
+
+`app/Livewire/Books/Search.php:24-25`
 
 ```php
-// app/Livewire/Books/Search.php:21-25
-#[Title('本を探す')]
-class Search extends Component
-{
-    #[Url(as: 'q', except: '')]
-    public string $keyword = '';
+#[Url(as: 'q', except: '')]
+public string $keyword = '';
 ```
 
-- `public string $keyword` … **検索キーワード（画面の状態）**。public なプロパティは画面と自動で同期される
-- `#[Url(as: 'q')]` … キーワードを URL の `?q=...` にも反映する（リロードしても検索結果が残る）
-- `#[Title('本を探す')]` … ブラウザのタブに出るタイトル
+`$keyword` が**検索キーワードを書き留めるメモ帳**。最初は空っぽ（`''`）。
+
+### 入力欄とメモ帳をつなぐ（wire:model）
+
+`resources/views/livewire/books/search.blade.php:4-5`
+
+```blade
+<flux:input
+    wire:model.live.debounce.500ms="keyword"
+```
+
+`wire:model="keyword"` は、**入力欄とメモ帳 `$keyword` を糸でつなぐ**指定。
+
+- 入力欄に「リーダブル」と打つ
+- 打つのが 0.5 秒止まると（`debounce.500ms`）、ブラウザが裏でサーバーに「メモ帳を『リーダブル』に書き換えて」と伝える
+- メモ帳が変わったので、Livewire が画面を作り直し、検索結果が表示される
+
+ページ全体を読み込み直さずに、画面の一部だけが変わる。**JavaScript を書かずに、PHP だけでこの動きが作れる**のが Livewire の特徴。
+
+### 画面に値を差し込む（Blade）
+
+ビューは HTML に、`{{ }}` や `@if`、`@foreach` を混ぜた **Blade** という書き方でできている。
+
+`resources/views/livewire/books/search.blade.php:21,26`
+
+```blade
+@foreach ($this->results ?? [] as $book)     {{-- 検索結果の本の数だけ繰り返す --}}
+    <p class="font-semibold">{{ $book->title }}</p>     {{-- 本のタイトルを差し込む --}}
+```
+
+- `@foreach ... @endforeach` … 繰り返し
+- `{{ $book->title }}` … 値を画面に差し込む
+
+`$this->results` は検索結果。`Search.php:32-46` の `results()` メソッドが、Google Books に問い合わせて本の一覧を返している。
+
+### どのお皿を使うか（render）
+
+`app/Livewire/Books/Search.php:90-93`
 
 ```php
-// app/Livewire/Books/Search.php:90-93
 public function render(): View
 {
     return view('livewire.books.search');
 }
 ```
 
-- `render()` … **どの見た目（ビュー）を使うか**。`livewire.books.search` は `resources/views/livewire/books/search.blade.php` のこと（`.` がフォルダの区切り）
+「`resources/views/livewire/books/search.blade.php` のお皿に盛り付ける」という指定。ファイルの場所の `/` を `.` に変えて書く決まり。
 
-### 2-3. 見た目 — `resources/views/livewire/books/search.blade.php`
+> **試してみる**
+> 1. `resources/views/livewire/books/search.blade.php:2` の `本を探す` を `本を検索する` に変えて保存する
+> 2. ブラウザの「本を探す」画面を再読み込みする → 見出しが変わる
+> 3. 確認したら元に戻す
 
-ビューは HTML に **Blade** という書き方を混ぜたもの。`{{ }}` や `@if` が Blade。
+---
 
-```blade
-{{-- search.blade.php:4-10 --}}
-<flux:input
-    wire:model.live.debounce.500ms="keyword"
-    icon="magnifying-glass"
-    placeholder="タイトル・著者名・ISBN で検索"
-    clearable
-    autofocus
-/>
-```
+## 4章 ボタンを押すと何が起きるか — wire:click と addToShelf
 
-- `<flux:input>` … Flux（Livewire 用の部品集）の入力欄
-- `wire:model.live.debounce.500ms="keyword"` … **入力欄と `$keyword` プロパティをつなぐ**。入力が 0.5 秒止まったら、裏で PHP 側の `$keyword` が更新され、画面が書き換わる
+### たとえ
 
-キーワードが変わると、検索結果の部分が表示し直される。検索結果はここで使われている。
+お客さんが「この本を、読んでいる棚に入れて」と注文する。ホール係は、
 
-```blade
-{{-- search.blade.php:14-16 --}}
-@if ($this->results === null)
-    <flux:callout variant="danger" ... heading="検索に失敗しました。..." />
-@elseif (mb_strlen(trim($keyword)) >= 2 && $this->results->isEmpty())
-```
+1. 注文の内容がおかしくないか確認する
+2. 倉庫に本を登録する
+3. その人の本棚に、その本を置く
+4. 「置きました」と画面を出し直す
 
-`$this->results` は、PHP 側のこのメソッドの結果。
+### ボタンとメソッドをつなぐ（wire:click）
 
-```php
-// app/Livewire/Books/Search.php:32-46
-#[Computed]
-public function results(): ?Collection
-{
-    if (mb_strlen(trim($this->keyword)) < 2) {
-        return collect();
-    }
-
-    try {
-        return app(GoogleBooksClient::class)->search($this->keyword);
-    } catch (RequestException|ConnectionException $e) {
-        // ...失敗したらログに残して null を返す
-        return null;
-    }
-}
-```
-
-- `#[Computed]` … **計算で求める値**。ビューから `$this->results` と書くと呼ばれ、1 回のリクエストの中では結果が使い回される
-- `app(GoogleBooksClient::class)` … Google Books API と通信するクラス（`app/Services/GoogleBooks/GoogleBooksClient.php`）を取り出して、`search()` を呼ぶ
-- 2 文字未満なら API を呼ばずに空の結果を返す
-
-### 2-4. ボタンを押す — `wire:click`
-
-検索結果の各行には「本棚に追加」のメニューがある。
+`resources/views/livewire/books/search.blade.php:46-48`
 
 ```blade
-{{-- search.blade.php:46-50 --}}
 @foreach (\App\Enums\ReadingStatus::cases() as $option)
     <flux:menu.item wire:click="addToShelf('{{ $book->googleBooksId }}', '{{ $option->value }}')">
         {{ $option->label() }}
-    </flux:menu.item>
-@endforeach
 ```
 
-- `@foreach` … 読書ステータスの選択肢（読みたい・読んでいる・読み終わった・中断）の数だけメニューを並べる
-- `wire:click="addToShelf('vol1', 'reading')"` … **クリックされたら PHP の `addToShelf()` メソッドを、この引数で呼ぶ**
-- `{{ $option->label() }}` … `{{ }}` は値を画面に出す。中身は自動でエスケープされるので、HTML を埋め込まれる攻撃（XSS）を防げる
+「本棚に追加」のメニューには「読みたい・読んでいる・読み終わった・中断」が並ぶ。
+`wire:click="addToShelf('vol1', 'reading')"` は「**押されたら、PHP の `addToShelf` を、この 2 つの値を渡して呼ぶ**」という意味。
 
-### 2-5. 追加の処理 — `addToShelf()`
+### 注文を処理する（addToShelf）
 
-クリックで呼ばれるのがこのメソッド。**このアプリで一番 Laravel らしい部分**なので、1 行ずつ見る。
+`app/Livewire/Books/Search.php:70-88`。ボタンを押すとこのメソッドが動く。
 
 ```php
-// app/Livewire/Books/Search.php:70-88
 public function addToShelf(string $googleBooksId, string $status = 'want'): void
 {
-    $status = ReadingStatus::tryFrom($status) ?? abort(422);                 // ①
+    // ① 注文の内容を確認する
+    $status = ReadingStatus::tryFrom($status) ?? abort(422);
 
-    $data = $this->results?->firstWhere('googleBooksId', $googleBooksId)     // ②
+    // ② 画面に出していた検索結果から、押された本のデータを探す
+    $data = $this->results?->firstWhere('googleBooksId', $googleBooksId)
         ?? app(GoogleBooksClient::class)->find($googleBooksId)
         ?? abort(404);
 
-    $book = Book::fromBookData($data);                                        // ③
+    // ③ 本を倉庫（books テーブル）に登録する
+    $book = Book::fromBookData($data);
 
-    $record = Auth::user()->readingRecords()->firstOrNew(['book_id' => $book->id]); // ④
+    // ④ この人の本棚に、この本がもうあるか探す。なければ新しく用意する
+    $record = Auth::user()->readingRecords()->firstOrNew(['book_id' => $book->id]);
 
-    if (! $record->exists) {                                                  // ⑤
+    // ⑤ 新しく用意したときだけ、ステータスを設定して保存する
+    if (! $record->exists) {
         $record->changeStatus($status);
     }
 
-    unset($this->shelved);                                                    // ⑥
+    // ⑥ 「本棚にある本」の情報を作り直させる → ボタンが「読んでいる」の印に変わる
+    unset($this->shelved);
 }
 ```
 
-| | していること |
-|---|---|
-| ① | 文字列 `'reading'` を、ステータスの型（Enum）`ReadingStatus::Reading` に変換する。存在しない値なら 422 エラーで止める（画面からは不正な値を送れてしまうので、必ず確認する） |
-| ② | 画面に表示していた検索結果から、クリックされた本のデータを探す |
-| ③ | 本を `books` テーブルに保存する（→ 2-6） |
-| ④ | 「ログイン中のユーザーの、この本の本棚レコード」を探す。なければ**保存前の新しいレコード**を作る（→ 2-7） |
-| ⑤ | 新しいレコードのときだけ、ステータスを設定して保存する（同じ本を 2 回追加しても重複しない） |
-| ⑥ | 「登録済みの本」の計算結果を捨てる。次の表示で計算し直され、ボタンがバッジに変わる |
+**① の確認が必要な理由**: 画面から送られてくる値は、ブラウザの開発者ツールで書き換えられる。`'reading'` の代わりに `'abc'` が送られてくるかもしれないので、決まった選択肢（4章の Enum）にない値なら、エラー（422）で止める。
 
-### 2-6. 本を保存する — モデル `app/Models/Book.php`
+**⑤ の理由**: 同じ本を 2 回追加しても、本棚に 2 冊並ばないようにしている。
 
-**モデル**は、データベースのテーブル 1 つに対応するクラス。`Book` モデルは `books` テーブルに対応する（クラス名を複数形にしたものがテーブル名になる決まり）。
+③ と ④ は倉庫係（モデル）の仕事。次の章で見る。
+
+> **試してみる（処理の途中をのぞく）**
+> 1. `app/Livewire/Books/Search.php:79` の `$book = Book::fromBookData($data);` の**次の行**に、`dd($book->toArray());` を書き足して保存する
+> 2. ブラウザで本を検索し、「本棚に追加」→「読んでいる」を押す
+> 3. 保存された本のデータが画面に表示されて、処理がそこで止まる（`dd` は「中身を表示して止める」デバッグ用の命令）
+> 4. 確認したら、書き足した行を消す
+
+---
+
+## 5章 モデルとデータベース — 倉庫係と倉庫
+
+### たとえ
+
+データベースは**倉庫**、テーブルは倉庫の中の**棚**、モデルは棚の担当の**倉庫係**。
+
+ReadLog の倉庫には、こんな棚（テーブル）がある。
+
+| テーブル | 中身 | 担当のモデル |
+|---|---|---|
+| `users` | ユーザー | `app/Models/User.php` |
+| `books` | 本（全ユーザー共通） | `app/Models/Book.php` |
+| `reading_records` | 誰の本棚に、どの本が、どのステータスで入っているか | `app/Models/ReadingRecord.php` |
+| `posts` | 感想 | `app/Models/Post.php` |
+
+モデルの名前を複数形にしたものがテーブル名になる（`Book` → `books`）という決まりがあるので、どのモデルがどのテーブルの担当か、どこにも書かなくて良い。
+
+### 本を登録する（③）
+
+`app/Models/Book.php:31-37`
 
 ```php
-// app/Models/Book.php:31-37
 public static function fromBookData(BookData $data): self
 {
     return self::updateOrCreate(
-        ['google_books_id' => $data->googleBooksId],
-        $data->toAttributes(),
+        ['google_books_id' => $data->googleBooksId],   // この ID の本が
+        $data->toAttributes(),                          // あれば更新、なければこの内容で作る
     );
 }
 ```
 
-- `updateOrCreate(探す条件, 保存する値)` … **`google_books_id` が一致する行があれば更新、なければ新しく作る**。SQL を書かなくても、モデルのメソッドで DB を操作できる。これを **Eloquent**（Laravel の ORM）と呼ぶ
-- 同じ本を何人が登録しても `books` テーブルには 1 行だけ、という設計（`docs/design.md` の「設計上の判断」）を、この 1 メソッドで実現している
+`updateOrCreate` は「**あれば更新、なければ作る**」。倉庫係に頼むと、裏でデータベースの命令（SQL）を作って実行してくれる。
 
-### 2-7. ユーザーと本棚をつなぐ — リレーション
+SQL で書くとこうなる処理を、PHP の 1 行で頼めるのがモデルの便利なところ。
 
-④ の `Auth::user()->readingRecords()` は、`User` モデルに書いた**リレーション（テーブル同士の関係）**を使っている。
+```sql
+SELECT * FROM books WHERE google_books_id = 'vol1';
+-- なければ
+INSERT INTO books (google_books_id, title, ...) VALUES ('vol1', 'リーダブルコード', ...);
+-- あれば
+UPDATE books SET title = 'リーダブルコード', ... WHERE id = 1;
+```
+
+同じ本を 10 人が本棚に入れても、`books` テーブルには 1 冊分だけ登録される。
+
+> **試してみる（倉庫の中をのぞく）**
+>
+> ターミナルで `php artisan tinker` を実行すると、PHP を 1 行ずつ試せる画面になる。次を 1 行ずつ打つ。
+>
+> ```php
+> App\Models\Book::count();                  // 本が何冊あるか
+> App\Models\Book::latest()->first()->title; // 一番新しく登録された本のタイトル
+> ```
+>
+> 画面で本を本棚に追加してから、もう一度 `App\Models\Book::count();` を打つと 1 冊増えている。終わるときは `exit`。
+
+---
+
+## 6章 リレーション — 「誰の」本棚か
+
+### たとえ
+
+本棚のデータ（`reading_records` テーブル）には、**持ち主のユーザー番号**と**本の番号**が書いてある。
+
+`users` テーブル
+
+| id | name |
+|---|---|
+| 1 | Test User |
+| 2 | 鈴木 |
+
+`books` テーブル
+
+| id | title |
+|---|---|
+| 10 | リーダブルコード |
+| 11 | テスト駆動開発 |
+
+`reading_records` テーブル
+
+| id | user_id | book_id | status |
+|---|---|---|---|
+| 100 | 1 | 10 | reading |
+| 101 | 1 | 11 | want |
+| 102 | 2 | 10 | finished |
+
+「Test User（1 番）は、リーダブルコード（10 番）を読んでいて、テスト駆動開発（11 番）を読みたい」と読める。
+この「番号でつながっている関係」を、モデルに書いておくのが**リレーション**。
+
+### コードのどこか
+
+`app/Models/User.php:86-89`
 
 ```php
-// app/Models/User.php:86-89
 public function readingRecords(): HasMany
 {
-    return $this->hasMany(ReadingRecord::class);
+    return $this->hasMany(ReadingRecord::class);   // ユーザーは、本棚のデータを「たくさん持っている」
 }
 ```
 
-- `hasMany` … **1 人のユーザーは、本棚レコードを複数持つ**（1 対 多）
-- `Auth::user()` … ログイン中のユーザー
-- `Auth::user()->readingRecords()` … 「ログイン中のユーザーの本棚レコードだけ」に絞り込んだ状態から始められる。`firstOrNew` で作った新しいレコードには、`user_id` が自動で入る
-
-逆向きの関係は `ReadingRecord` 側に書いてある。
+`app/Models/ReadingRecord.php:60-71`
 
 ```php
-// app/Models/ReadingRecord.php:60-71
-public function user(): BelongsTo   { return $this->belongsTo(User::class); }
-public function book(): BelongsTo   { return $this->belongsTo(Book::class); }
+public function user(): BelongsTo
+{
+    return $this->belongsTo(User::class);   // 本棚のデータは、1 人のユーザーの「もの」
+}
+
+public function book(): BelongsTo
+{
+    return $this->belongsTo(Book::class);   // 本棚のデータは、1 冊の本を指している
+}
 ```
 
-`belongsTo` は「このレコードは 1 人のユーザー（1 冊の本）に属する」。これで `$record->book->title` のように、本棚レコードから本のタイトルをたどれる。
+| 書き方 | 意味 | 例 |
+|---|---|---|
+| `hasMany` | たくさん持っている | ユーザーは本棚のデータをたくさん持っている |
+| `belongsTo` | 〜のもの | 本棚のデータは、あるユーザーのもの |
 
-### 2-8. ステータスを変えて保存する — `changeStatus()`
+### なぜこう書くのか
 
-⑤ で呼んでいるのは、`ReadingRecord` モデルに自分で書いたメソッド。
+リレーションを書いておくと、番号を自分で照らし合わせなくても、たどって取り出せる。
 
 ```php
-// app/Models/ReadingRecord.php:39-55
+Auth::user()->readingRecords()      // ログイン中のユーザーの、本棚のデータ全部
+$record->book->title                // 本棚のデータが指している本の、タイトル
+```
+
+4章の ④ `Auth::user()->readingRecords()->firstOrNew(...)` は「**ログイン中のユーザーの本棚の中から**探す。なければ用意する」という意味。新しく用意したデータには、持ち主の番号（`user_id`）が自動で入る。
+
+> **試してみる**
+>
+> `php artisan tinker` で次を 1 行ずつ打つ。
+>
+> ```php
+> $user = App\Models\User::where('email', 'test@example.com')->first();
+> $user->readingRecords()->count();                         // この人の本棚の冊数
+> $user->readingRecords()->first()->book->title;            // 本棚の 1 冊目のタイトル
+> ```
+
+---
+
+## 7章 ステータスと日付の自動記録 — モデルに書いた「ルール」
+
+### コードのどこか
+
+4章の ⑤ で呼んでいた `changeStatus()` は、`ReadingRecord` モデルに自分で書いたメソッド。
+
+`app/Models/ReadingRecord.php:39-55`
+
+```php
 public function changeStatus(ReadingStatus $status): void
 {
     $this->status = $status;
 
-    if ($status === ReadingStatus::Reading) {
-        $this->started_on ??= today();
+    if ($status === ReadingStatus::Reading) {     // 「読んでいる」にしたら
+        $this->started_on ??= today();             // 読み始めた日を今日にする（もう入っていれば変えない）
     }
 
-    if ($status === ReadingStatus::Finished) {
+    if ($status === ReadingStatus::Finished) {    // 「読み終わった」にしたら
         $this->started_on ??= today();
-        $this->finished_on ??= today();
+        $this->finished_on ??= today();            // 読み終わった日も今日にする
     } else {
-        $this->finished_on = null;
+        $this->finished_on = null;                 // それ以外なら、読み終わった日を消す
     }
 
-    $this->save();
+    $this->save();                                 // ここで倉庫に保存
 }
 ```
 
-- 「読んでいる」にしたら読み始めた日、「読み終わった」にしたら読み終わった日を自動で記録する
-- `??=` は「まだ値がなければ代入する」。一度記録した日付は上書きしない
-- `$this->save()` で、ここで初めて `INSERT`（新規）か `UPDATE`（既存）の SQL が実行される
+### なぜモデルに書くのか
 
-このような「データのルール」をモデルに書いておくと、本棚画面（`app/Livewire/Shelf/Index.php`）からステータスを変えたときも同じルールが使われる。
+「読み終わったら日付を記録する」というルールは、**本を探す画面**からステータスを決めたときも、**本棚画面**でステータスを変えたときも同じであってほしい。
+ルールをモデルに 1 か所だけ書いておけば、どの画面から呼んでも同じ動きになる。各画面に同じ処理を書くと、片方だけ直し忘れる、ということが起きる。
 
-**型の変換（キャスト）** も見ておく。
+### 選択肢の一覧（Enum）
 
-```php
-// app/Models/ReadingRecord.php:25-34
-protected function casts(): array
-{
-    return [
-        'status' => ReadingStatus::class,
-        'rating' => 'integer',
-        // ...
-        'started_on' => 'date',
-        'finished_on' => 'date',
-    ];
-}
-```
-
-DB には `status` が `'reading'` という文字列で入っているが、PHP で読むと自動で `ReadingStatus::Reading` に変わる。日付も文字列ではなく日付のオブジェクトになり、`$record->started_on->format('Y/m/d')` のように使える。
-
-### 2-9. ステータスの選択肢 — Enum `app/Enums/ReadingStatus.php`
+ステータスの選択肢は `app/Enums/ReadingStatus.php` にまとめてある。
 
 ```php
-// app/Enums/ReadingStatus.php:5-20
 enum ReadingStatus: string
 {
-    case Want = 'want';
+    case Want = 'want';            // データベースには 'want' と保存される
     case Reading = 'reading';
     case Finished = 'finished';
     case Dropped = 'dropped';
@@ -340,173 +457,163 @@ enum ReadingStatus: string
     public function label(): string
     {
         return match ($this) {
-            self::Want => '読みたい',
-            self::Reading => '読んでいる',
+            self::Want => '読みたい',   // 画面にはこの名前で表示する
             // ...
-        };
-    }
 ```
 
-決まった選択肢を 1 か所にまとめておくと、画面の表示名（`label()`）や色（`color()`）もここで管理できる。選択肢を増やすときも、このファイルを直せば画面のメニューにも自動で出る（2-4 の `ReadingStatus::cases()` が全選択肢を返すため）。
+画面の表示名もここで決めているので、**このファイルを直すと全画面の表示が変わる**。
 
-### 2-10. テーブルの設計図 — マイグレーション
-
-ここまで出てきた `reading_records` テーブルは、マイグレーションで定義している。
-
-```php
-// database/migrations/2026_09_30_000002_create_reading_records_table.php:11-24
-Schema::create('reading_records', function (Blueprint $table) {
-    $table->id();
-    $table->foreignId('user_id')->constrained()->cascadeOnDelete();
-    $table->foreignId('book_id')->constrained()->cascadeOnDelete();
-    $table->string('status', 20);
-    $table->unsignedTinyInteger('rating')->nullable();
-    $table->unsignedInteger('current_page')->nullable();
-    $table->date('started_on')->nullable();
-    $table->date('finished_on')->nullable();
-    $table->timestamps();
-
-    $table->unique(['user_id', 'book_id']);
-    $table->index(['user_id', 'status']);
-});
-```
-
-- `foreignId('user_id')->constrained()` … `users` テーブルの `id` を指す列（外部キー）。`cascadeOnDelete()` でユーザーを消すと本棚も消える
-- `nullable()` … 空でも良い列
-- `timestamps()` … 作成日時 `created_at` と更新日時 `updated_at` を自動で管理する列
-- `unique(['user_id', 'book_id'])` … **同じユーザーが同じ本を 2 回登録できない**ように、DB 側でも防ぐ
-- `php artisan migrate` を実行すると、この設計図どおりにテーブルが作られる。本番へのデプロイでも同じコマンドが動いている
-
-> **試してみる（tinker）**: ターミナルで `php artisan tinker` を実行すると、アプリのコードを 1 行ずつ試せる。
->
-> ```php
-> $user = App\Models\User::where('email', 'test@example.com')->first();
-> $user->readingRecords()->with('book')->get()->map(fn ($r) => [$r->book->title, $r->status->label()]);
-> App\Models\ReadingRecord::first()->book->title;
-> ```
->
-> 画面で本棚に追加したあとにもう一度実行すると、増えているのが分かる。終わるときは `exit`。
+> **試してみる**
+> 1. `app/Enums/ReadingStatus.php:15` の `'読みたい'` を `'積読'` に変えて保存する
+> 2. 「本を探す」画面のメニュー、本棚画面のタブ、書籍ページの表示を見る → 全部「積読」になっている
+> 3. 確認したら元に戻す
 
 ---
 
-## 3. 他人のデータを守る — Policy（認可）
+## 8章 マイグレーション — 棚の設計図
 
-本棚画面では、ステータスの変更や削除ができる。ここで大事なのは「**他人の本棚は変更できない**」こと。
+### たとえ
 
-画面から送られてくるレコード ID は、ブラウザの開発者ツールで書き換えられる。そのため、サーバー側で必ず確認する。
+倉庫に棚を作る前に、**どんな仕切り（列）を持つ棚か**を設計図に書いておく。
+設計図をもとに棚を作るのが `php artisan migrate` というコマンド。
+
+### コードのどこか
+
+`database/migrations/2026_09_30_000002_create_reading_records_table.php:11-24`
 
 ```php
-// app/Livewire/Shelf/Index.php:63-71
+Schema::create('reading_records', function (Blueprint $table) {
+    $table->id();                                                     // 番号
+    $table->foreignId('user_id')->constrained()->cascadeOnDelete();   // 持ち主のユーザー番号
+    $table->foreignId('book_id')->constrained()->cascadeOnDelete();   // 本の番号
+    $table->string('status', 20);                                     // ステータス
+    $table->unsignedTinyInteger('rating')->nullable();                // ★評価（空でも良い）
+    $table->unsignedInteger('current_page')->nullable();              // 何ページまで読んだか
+    $table->date('started_on')->nullable();                           // 読み始めた日
+    $table->date('finished_on')->nullable();                          // 読み終わった日
+    $table->timestamps();                                             // 作った日時・更新した日時
+
+    $table->unique(['user_id', 'book_id']);                           // 同じ人が同じ本を 2 回入れられない
+    // ...
+});
+```
+
+- `nullable()` … 空でも良い
+- `cascadeOnDelete()` … ユーザーを削除したら、その人の本棚のデータも一緒に消える
+- `unique([...])` … 4章 ⑤ のプログラム側の確認に加えて、**倉庫側でも二重登録を防ぐ**（二重の安全装置）
+
+### なぜ設計図をファイルにするのか
+
+テーブルの作り方がファイルとして残るので、**誰の PC でも、本番のサーバーでも、同じテーブルを作れる**。
+AWS へのデプロイでも、裏で `php artisan migrate` が動いて、この設計図どおりにテーブルを作っていた。
+
+> **試してみる**
+>
+> ```bash
+> php artisan migrate:status    # どの設計図がもう反映されているかの一覧
+> ```
+
+---
+
+## 9章 Policy — 他人の本棚を守る
+
+### たとえ
+
+本棚画面で「ステータスを変える」「削除する」を押すと、ブラウザは「**○番の本棚データを変えて**」と頼んでくる。
+この番号はブラウザの開発者ツールで書き換えられるので、他人の本棚データの番号を送ってくる人がいるかもしれない。
+そこで、処理の前に「**これはあなたの本棚ですか？**」と確認する。この確認係が **Policy**。
+
+### コードのどこか
+
+本棚画面の「ステータスを変える」処理 `app/Livewire/Shelf/Index.php:63-71`
+
+```php
 public function changeStatus(int $recordId, string $status): void
 {
     $record = $this->findRecord($recordId);
-    $this->authorize('update', $record);       // ← ここで確認
+    $this->authorize('update', $record);          // ← 確認係に「この人が変更して良いか」を聞く
 
     $record->changeStatus(ReadingStatus::tryFrom($status) ?? abort(422));
     // ...
 }
 ```
 
-`$this->authorize('update', $record)` を呼ぶと、Laravel が `ReadingRecord` 用の **Policy** を自動で探して判定する。
+確認係 `app/Policies/ReadingRecordPolicy.php:10-13`
 
 ```php
-// app/Policies/ReadingRecordPolicy.php:10-13
 public function update(User $user, ReadingRecord $record): bool
 {
-    return $user->id === $record->user_id;
+    return $user->id === $record->user_id;   // ログイン中の人の番号と、本棚の持ち主の番号が同じなら OK
 }
 ```
 
-- **ログイン中のユーザーの ID と、レコードの持ち主の ID が同じときだけ OK**
-- 違えば 403（Forbidden）エラーになり、それ以降の処理は動かない
-- `ReadingRecord` モデルに対する Policy は `ReadingRecordPolicy` という名前で `app/Policies/` に置く、という**命名の決まり**で自動的に結びつく（設定ファイルに書く必要がない）
+OK でなければ、403（禁止）エラーになり、変更されない。
 
-Laravel にはこのような「決まった場所に、決まった名前で置けば自動でつながる」仕組みが多い（**設定より規約**）。最初は魔法のように見えるが、規約を知ると読めるようになる。
+`ReadingRecord` モデルの確認係は、`app/Policies/ReadingRecordPolicy.php` という名前で置けば Laravel が自動で見つけてくれる。
+Laravel には、こういう「**決まった場所に、決まった名前で置けば自動でつながる**」仕組みが多い（5章のモデルとテーブル名も同じ）。最初は魔法のように見えるが、決まりを知ると読めるようになる。
 
 ---
 
-## 4. テストで動作を確かめる
+## 10章 自動テスト — 確認ロボット
 
-`tests/` には、画面を手で操作しなくても動作を確認できる自動テストがある。2 章の流れは、このテストで確かめている。
+### たとえ
+
+コードを変えるたびに、画面を手で操作して全部確認するのは大変。
+そこで、「**こう操作したら、こうなるはず**」を書いておき、ロボットに一瞬で全部確認させる。これが自動テスト。ReadLog には 72 個のテストがある。
+
+### コードのどこか
+
+4章の「本棚に追加」を確認しているテスト `tests/Feature/Books/SearchTest.php:57-71`
 
 ```php
-// tests/Feature/Books/SearchTest.php:57-71
 it('adds a book to the shelf', function () {
-    Livewire::actingAs($this->user)                   // このユーザーでログインした状態で
+    Livewire::actingAs($this->user)                   // このユーザーでログインして
         ->test(Search::class)                         // 「本を探す」画面を開き
         ->set('keyword', 'リーダブル')                 // キーワードを入力して
         ->call('addToShelf', 'vol1', 'reading')       // 「本棚に追加 → 読んでいる」を押すと
-        ->assertSee('読んでいる');                     // 画面に「読んでいる」と出る
+        ->assertSee('読んでいる');                     // 画面に「読んでいる」と出るはず
 
-    $book = Book::where('google_books_id', 'vol1')->sole();
-
-    expect($book->title)->toBe('リーダブルコード')     // 本が保存されていて
-        ->and($this->user->readingRecords()->sole())  // 本棚レコードが 1 件あり
-        ->book_id->toBe($book->id)
-        ->status->toBe(ReadingStatus::Reading)        // ステータスが「読んでいる」で
-        ->started_on->not->toBeNull();                // 読み始めた日が入っている
+    // 本が倉庫に登録されていて、本棚のステータスが「読んでいる」で、読み始めた日が入っているはず
+    // ...
 });
 ```
 
-テストでは本物の Google Books API は呼ばず、同じファイルの先頭（`beforeEach`）で `Http::fake()` を使って偽の応答を返している。
+本物の Google Books には問い合わせず、同じファイルの最初の方（`beforeEach`）で、偽の検索結果を返すように準備している。
 
-3 章の Policy も、「他人の本棚を変更しようとすると 403 になる」ことをテストしている（`tests/Feature/Shelf/ShelfTest.php:76`）。
-
-> **試してみる**:
+> **試してみる（テストが守ってくれることを体験する）**
+> 1. `./vendor/bin/pest` を実行する → 全部のテストが通る（緑）
+> 2. 9章の確認係 `app/Policies/ReadingRecordPolicy.php:12` を `return true;` に書き換えて保存する（＝誰でも他人の本棚を変更できる状態）
+> 3. もう一度 `./vendor/bin/pest` を実行する → 「他人の本棚を変更できないはず」のテストが**失敗する**（赤）
+> 4. 元に戻して、もう一度実行する → また全部通る
 >
-> ```bash
-> ./vendor/bin/pest                                  # 全テストを実行
-> ./vendor/bin/pest --filter="adds a book"           # 名前で絞って 1 つだけ実行
-> ```
->
-> 次に、`app/Policies/ReadingRecordPolicy.php` の `update()` を一時的に `return true;` に書き換えてから、もう一度全テストを実行する。**他人の本棚を変更できてしまう**ので、テストが失敗するはず。確認したら元に戻す。テストが「壊れたことを教えてくれる」感覚がつかめる。
+> うっかり守りを外してしまっても、テストが教えてくれる。
 
 ---
 
-## 5. 自分で動かして確かめる
+## 11章 用語のまとめ
 
-読むだけより、少し変えて結果を見るほうが早く理解できる。どれも元に戻せば問題ない（`git checkout .` で全部元に戻せる）。
-
-1. **表示名を変える**: `app/Enums/ReadingStatus.php` の `'読みたい'` を `'積読'` に変えて、本を探す画面と本棚画面を見る。1 か所変えただけで全画面に反映される
-2. **処理の途中を覗く**: `app/Livewire/Books/Search.php` の `addToShelf()` の `$book = Book::fromBookData($data);` の次の行に `dd($book->toArray());` を入れて、「本棚に追加」を押す。保存された本のデータが画面に表示されて処理が止まる（`dd` は "dump and die"。デバッグでよく使う）
-3. **実行された SQL を見る**: `php artisan tinker` で次を実行すると、Eloquent が裏で実行している SQL が分かる
-
-   ```php
-   DB::enableQueryLog();
-   App\Models\User::first()->readingRecords()->with('book')->get();
-   DB::getQueryLog();
-   ```
-
-4. **ログを見る**: `composer run dev` を動かしているターミナルの `[logs]` の行や、`storage/logs/laravel.log` に、エラーや `Log::warning()` の内容が出る
-
----
-
-## 6. 用語集
-
-| 用語 | 意味 | ReadLog での場所 |
-|---|---|---|
-| ルート（Route） | URL と処理の対応 | `routes/web.php` |
-| ミドルウェア | 処理の前に挟むチェック（ログイン確認など） | `Route::middleware(['auth'])` |
-| Livewire コンポーネント | 画面の状態と操作を持つ PHP クラス + ビュー | `app/Livewire/` |
-| Blade | HTML に `{{ }}` や `@if` を混ぜて書けるテンプレート | `resources/views/` |
-| Eloquent（モデル） | テーブルを PHP のクラスとして扱う仕組み | `app/Models/` |
-| リレーション | テーブル同士の関係（`hasMany`、`belongsTo` など） | `User::readingRecords()` |
-| マイグレーション | テーブルの設計図。`php artisan migrate` で反映 | `database/migrations/` |
-| キャスト | DB の値を PHP の型に自動変換する設定 | `ReadingRecord::casts()` |
-| Enum | 決まった選択肢の型 | `app/Enums/ReadingStatus.php` |
-| Policy | 「この操作をして良いか」の判定 | `app/Policies/` |
-| ファサード | `Auth::user()` や `Log::warning()` のような、よく使う機能の呼び出し口 | `Auth`、`Log`、`Http` |
-| コレクション | 配列を便利に扱うクラス（`map`、`pluck`、`firstWhere` など） | `collect()`、検索結果 |
-| Factory / Seeder | テストや開発用のダミーデータを作る仕組み | `database/factories/`、`database/seeders/` |
-| artisan | Laravel のコマンドラインツール | `php artisan ...` |
-| tinker | アプリのコードを対話的に試せるツール | `php artisan tinker` |
+| 用語 | たとえ | 何をするもの | 場所 |
+|---|---|---|---|
+| ルート | 案内係 | URL を見て、担当の処理に回す | `routes/web.php` |
+| ルートの名前 | 連絡帳の登録名 | URL にあだ名を付ける。`route('名前')` で URL になる | `->name(...)` |
+| ミドルウェア | 会員証チェック | 処理の前に確認する（ログインしているか等） | `Route::middleware(...)` |
+| Livewire コンポーネント | ホール係 | 画面の処理。メモ帳（プロパティ）とボタンの処理（メソッド） | `app/Livewire/` |
+| ビュー（Blade） | お皿 | 画面の見た目。`{{ }}` で値を差し込む | `resources/views/` |
+| `wire:model` | 糸 | 入力欄とメモ帳をつなぐ | ビューの中 |
+| `wire:click` | 呼び出しボタン | 押されたら PHP のメソッドを呼ぶ | ビューの中 |
+| モデル | 倉庫係 | データベースの読み書き | `app/Models/` |
+| リレーション | 番号でつながった関係 | `hasMany`（たくさん持っている）、`belongsTo`（〜のもの） | モデルの中 |
+| マイグレーション | 棚の設計図 | テーブルの作り方 | `database/migrations/` |
+| Enum | 選択肢の一覧 | 決まった選択肢と表示名 | `app/Enums/` |
+| Policy | 本人確認 | 他人のデータを操作させない | `app/Policies/` |
+| テスト | 確認ロボット | 操作と結果を自動で確認する | `tests/` |
+| artisan | 道具箱 | Laravel のコマンド（`php artisan ...`） | ターミナル |
+| tinker | 実験室 | PHP を 1 行ずつ試せる | `php artisan tinker` |
 
 ---
 
-## 7. 次に読むもの
+## 12章 次にやること
 
-1. **ほかの画面も同じ流れで読む**: 本棚画面 `app/Livewire/Shelf/Index.php` と `resources/views/livewire/shelf/index.blade.php`。2 章と同じ「ルート → コンポーネント → モデル → ビュー」の流れで読めるはず
-2. **フォームと入力チェック**: 感想の投稿 `app/Livewire/Posts/Create.php` と `app/Livewire/Forms/PostForm.php`。`rules()` に書いた入力チェック（バリデーション）と、多対多のリレーション（タグ）が出てくる
-3. **公式ドキュメント**（日本語訳）: [Laravel 日本語ドキュメント](https://readouble.com/laravel/)（ルーティング、Eloquent、マイグレーション、認可の章）、[Livewire 公式ドキュメント](https://livewire.laravel.com/docs)（英語。Properties、Actions、Computed Properties の章）
-
-読み終わったら、小さな機能を自分で書いてみる段階に進む（例: 本棚で「何ページまで読んだか」を入力・表示できるようにする。DB の列 `current_page` はもう用意してある）。
+1. **本棚画面を自分で読む**: `app/Livewire/Shelf/Index.php` と `resources/views/livewire/shelf/index.blade.php`。このガイドと同じ「ルート → ホール係 → 倉庫係 → お皿」の順で読めるか試す
+2. **小さな機能を自分で書く**: 本棚で「何ページまで読んだか」を入力・表示できるようにする。倉庫の棚（`current_page` 列）はもう用意してあるので、ホール係（メソッド）とお皿（入力欄）を書けば完成する
+3. **公式ドキュメント**: [Laravel 日本語ドキュメント](https://readouble.com/laravel/)。このガイドで出てきた「ルーティング」「Eloquent（モデル）」「マイグレーション」「認可（Policy）」の章を読むと、より詳しく分かる
