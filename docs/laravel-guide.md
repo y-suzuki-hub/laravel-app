@@ -325,87 +325,252 @@ UPDATE books SET title = 'リーダブルコード', ... WHERE id = 1;
 
 ---
 
-## 6章 リレーション — 「誰の」本棚か
+## 6章 リレーション — 表と表のつながり
 
-### たとえ
+この章は少し長いので、6 つのステップに分けて進める。
 
-本棚のデータ（`reading_records` テーブル）には、**持ち主のユーザー番号**と**本の番号**が書いてある。
+1. テーブル・設計図・倉庫係は別のもの
+2. 「数の関係」には 3 種類ある
+3. 種類ごとに、表への書き方が違う
+4. ReadLog の表は、どの種類か
+5. Laravel ではどう書くか
+6. リレーションを書くと何がうれしいか
 
-`users` テーブル
+### 6-1. テーブル・設計図・倉庫係は別のもの
 
-| id | name |
+先に、言葉の整理をしておく。同じ「本棚」について、**別々のものが 3 つ**ある。
+
+| もの | 名前 | 種類 | 置き場所 | たとえ |
+|---|---|---|---|---|
+| **テーブル** | `reading_records` | データベースの中の**表**（PHP ファイルではない） | データベース（PC では `database/database.sqlite` の中） | 倉庫の**棚**（実物） |
+| **マイグレーション** | `2026_09_30_000002_create_reading_records_table.php` | PHP ファイル | `database/migrations/` | 棚の**設計図** |
+| **モデル** | `ReadingRecord.php` | PHP ファイル | `app/Models/` | その棚の担当の**倉庫係** |
+
+- **テーブル**: データそのものが入っている表
+- **マイグレーション**: 「この列を持つテーブルを作れ」という指示書。`php artisan migrate` でテーブルが作られる（8章）
+- **モデル**: PHP からテーブルを読み書きする係。`ReadingRecord::where(...)` と書くと、`reading_records` テーブルを見に行く
+
+テーブルとモデルは、書き方が違うだけで名前が対応している。
+
+| テーブル（複数形・小文字・`_` 区切り） | モデル（単数形・大文字始まり） |
 |---|---|
-| 1 | Test User |
-| 2 | 鈴木 |
+| `users` | `User` |
+| `books` | `Book` |
+| `reading_records` | `ReadingRecord` |
+| `posts` | `Post` |
+| `tags` | `Tag` |
+| `post_tag` | なし（理由は 6-5 で） |
 
-`books` テーブル
+> **試してみる**: `php artisan db:table reading_records` を実行すると、データベースの中にある `reading_records` テーブルの列の一覧が出る。設計図（`database/migrations/2026_09_30_000002_create_reading_records_table.php`）と見比べると、書いた列がそのままテーブルになっている。
 
-| id | title |
-|---|---|
-| 10 | リーダブルコード |
-| 11 | テスト駆動開発 |
+### 6-2. 「数の関係」には 3 種類ある
 
-`reading_records` テーブル
+2 つのものの間で「何個と何個がつながるか」を考えると、3 種類に分けられる。データベースに限らず、身の回りにある関係。
 
-| id | user_id | book_id | status |
+**1対1** — 片方 1 つに、相手も 1 つだけ
+
+- 例: **人とマイナンバー**。1 人にマイナンバーは 1 つ。1 つのマイナンバーは 1 人のもの
+
+**1対多** — 片方 1 つに、相手はたくさん
+
+- 例: **お母さんと子ども**。1 人のお母さんに子どもは何人もいる。1 人の子どもに（産みの）お母さんは 1 人
+
+**多対多** — どちらから見てもたくさん
+
+- 例: **学生と授業**。1 人の学生は授業をいくつも取る。1 つの授業は学生が何人も取る
+
+**見分け方**: 両方の向きから「1 つに対して、相手はいくつ？」と聞く。
+
+| | A 1 つに B は？ | B 1 つに A は？ | 種類 |
 |---|---|---|---|
-| 100 | 1 | 10 | reading |
-| 101 | 1 | 11 | want |
-| 102 | 2 | 10 | finished |
+| 人 と マイナンバー | 1 つ | 1 人 | 1対1 |
+| お母さん と 子ども | 何人も | 1 人 | 1対多 |
+| 学生 と 授業 | いくつも | 何人も | 多対多 |
 
-「Test User（1 番）は、リーダブルコード（10 番）を読んでいて、テスト駆動開発（11 番）を読みたい」と読める。
-この「番号でつながっている関係」を、モデルに書いておくのが**リレーション**。
+### 6-3. 種類ごとに、表への書き方が違う
 
-### コードのどこか
+表と表は、**相手の番号（id）を書いておく**ことでつなぐ。図書館の貸出記録に、借りた人の名前ではなく会員番号を書くのと同じ。
 
-`app/Models/User.php:86-89`
+**1対多: 「1」の側の番号を、「多」の側の表に書く**
+
+お母さん
+
+| id | 名前 |
+|---|---|
+| 1 | 花子 |
+
+子ども
+
+| id | 名前 | **mother_id** |
+|---|---|---|
+| 10 | 太郎 | **1** |
+| 11 | 次郎 | **1** |
+
+「太郎と次郎のお母さんは 1 番（花子）」と読める。
+反対にお母さんの表に子どもの番号を書こうとすると、子どもが何人いるか分からないので、列をいくつ作ればいいか決められない。だから**番号は必ず「多」の側に書く**。
+
+**1対1: どちらか片方の表に、相手の番号を書く**
+
+書き方は 1対多 と同じ。番号が 1 つしか入らないだけ。
+
+**多対多: 「つなぐだけの表」を間に作る**
+
+学生も授業も「多」なので、どちらの表にも相手の番号を書けない。そこで「**誰がどの授業を取っているか**」だけを書く 3 つ目の表（**中間テーブル**）を作る。
+
+学生
+
+| id | 名前 |
+|---|---|
+| 1 | 佐藤 |
+| 2 | 田中 |
+
+授業
+
+| id | 名前 |
+|---|---|
+| 50 | 数学 |
+| 51 | 英語 |
+
+履修（中間テーブル）
+
+| student_id | lesson_id |
+|---|---|
+| 1 | 50 |
+| 1 | 51 |
+| 2 | 50 |
+
+「佐藤は数学と英語、田中は数学」と読める。**多対多は、中間テーブルを挟んだ 1対多 が 2 つ**でできている。
+
+### 6-4. ReadLog の表は、どの種類か
+
+| つながり | 種類 | 番号を書いている場所 |
+|---|---|---|
+| ユーザー と 感想 | **1対多**（1 人が感想をたくさん書く。1 つの感想を書いたのは 1 人） | `posts` テーブルの `user_id` |
+| 本 と 感想 | **1対多**（1 冊に感想がたくさん付く） | `posts` テーブルの `book_id` |
+| 感想 と タグ | **多対多**（1 つの感想にタグがいくつも付き、1 つのタグも感想にいくつも付く） | 中間テーブル `post_tag` |
+| ユーザー と 本 | **多対多**（1 人が本をたくさん本棚に入れ、1 冊の本も何人もの本棚に入る） | 中間テーブル `reading_records` |
+| — | 1対1 | ReadLog にはない |
+
+最後の「ユーザーと本」がポイント。**`reading_records` は、ユーザーと本の多対多をつなぐ中間テーブル**。
+学生と授業の「履修」と同じ形だが、番号だけでなく「ステータス」「★評価」「読み始めた日」なども一緒に書いている。
+
+`reading_records` テーブルの中身の例
+
+| id | user_id | book_id | status | rating |
+|---|---|---|---|---|
+| 100 | 1 | 10 | reading | |
+| 101 | 1 | 11 | want | |
+| 102 | 2 | 10 | finished | 5 |
+
+「ユーザー 1 番は、本 10 番を読んでいて、本 11 番を読みたい。ユーザー 2 番は、本 10 番を読み終わって ★5」と読める。
+
+### 6-5. Laravel ではどう書くか
+
+モデルに「このテーブルとは、こういう種類の関係でつながっている」と書いておく。これが**リレーション**。
+種類ごとに、両側のモデルに書くものが決まっている。
+
+| 種類 | 番号を持っていない側 | 番号を持っている側 |
+|---|---|---|
+| 1対1 | `hasOne`（1 つ持っている） | `belongsTo`（〜のもの） |
+| 1対多 | `hasMany`（たくさん持っている） | `belongsTo`（〜のもの） |
+| 多対多 | `belongsToMany` | `belongsToMany`（中間テーブルを挟むので、両側とも同じ） |
+
+**迷ったら**: 設計図（マイグレーション）で「`○○_id` の列がどのテーブルにあるか」を見る。その列を持っているテーブルのモデルに `belongsTo` を書く。
+
+**1対多: ユーザー と 感想**
 
 ```php
-public function readingRecords(): HasMany
+// app/Models/User.php:94（番号を持っていない側）
+public function posts(): HasMany
 {
-    return $this->hasMany(ReadingRecord::class);   // ユーザーは、本棚のデータを「たくさん持っている」
+    return $this->hasMany(Post::class);       // ユーザーは、感想をたくさん持っている
 }
-```
 
-`app/Models/ReadingRecord.php:60-71`
-
-```php
+// app/Models/Post.php:45（user_id を持っている側）
 public function user(): BelongsTo
 {
-    return $this->belongsTo(User::class);   // 本棚のデータは、1 人のユーザーの「もの」
-}
-
-public function book(): BelongsTo
-{
-    return $this->belongsTo(Book::class);   // 本棚のデータは、1 冊の本を指している
+    return $this->belongsTo(User::class);     // 感想は、あるユーザーのもの
 }
 ```
 
-| 書き方 | 意味 | 例 |
-|---|---|---|
-| `hasMany` | たくさん持っている | ユーザーは本棚のデータをたくさん持っている |
-| `belongsTo` | 〜のもの | 本棚のデータは、あるユーザーのもの |
+「`user_id` 列を使う」とはどこにも書いていない。`User` とつながるなら列名は `user_id`、という**名前の決まり**で Laravel が判断している。
 
-### なぜこう書くのか
-
-リレーションを書いておくと、番号を自分で照らし合わせなくても、たどって取り出せる。
+**多対多: 感想 と タグ**
 
 ```php
-Auth::user()->readingRecords()      // ログイン中のユーザーの、本棚のデータ全部
-$record->book->title                // 本棚のデータが指している本の、タイトル
+// app/Models/Post.php:61
+public function tags(): BelongsToMany
+{
+    return $this->belongsToMany(Tag::class);  // 感想には、タグがいくつも付く
+}
+
+// app/Models/Tag.php:22
+public function posts(): BelongsToMany
+{
+    return $this->belongsToMany(Post::class); // タグは、感想にいくつも付く
+}
 ```
 
-4章の ④ `Auth::user()->readingRecords()->firstOrNew(...)` は「**ログイン中のユーザーの本棚の中から**探す。なければ用意する」という意味。新しく用意したデータには、持ち主の番号（`user_id`）が自動で入る。
+中間テーブル `post_tag` は、2 つのモデル名（`Post` と `Tag`）をアルファベット順に `_` でつないだ名前、という決まりで Laravel が自動で見つける。
+`post_tag` には番号の組み合わせしか入っていないので、専用のモデル（倉庫係）はいらない。`belongsToMany` が直接読み書きしてくれる。
+
+**多対多だけど、中間テーブルに情報がある: ユーザー と 本**
+
+`reading_records` にはステータスや★評価があり、「読み終わったら日付を記録する」というルール（7章）も書きたい。
+そこで中間テーブルにも専用のモデル（`ReadingRecord`）を用意して、**1対多 を 2 つ**として書いている。
+
+```php
+// app/Models/User.php:86        ユーザー 1 人 → 本棚の行がたくさん（1対多）
+public function readingRecords(): HasMany { return $this->hasMany(ReadingRecord::class); }
+
+// app/Models/Book.php:42        本 1 冊 → 本棚の行がたくさん（1対多）
+public function readingRecords(): HasMany { return $this->hasMany(ReadingRecord::class); }
+
+// app/Models/ReadingRecord.php:60, 68   本棚の行 → ユーザー 1 人・本 1 冊（user_id と book_id を持っている）
+public function user(): BelongsTo { return $this->belongsTo(User::class); }
+public function book(): BelongsTo { return $this->belongsTo(Book::class); }
+```
+
+### 6-6. リレーションを書くと何がうれしいか
+
+**番号をたどる手間を、Laravel が引き受けてくれる。**
+
+「ログイン中のユーザーの本棚の 1 冊目のタイトル」を知りたいとき:
+
+```php
+// リレーションがない場合: 番号を自分でたどる
+$record = ReadingRecord::where('user_id', $user->id)->first();   // ① この人の番号で本棚の行を探す
+$book = Book::find($record->book_id);                             // ② 行に書いてある本の番号で本を探す
+$book->title;                                                     // ③ やっとタイトル
+
+// リレーションがある場合: Laravel がたどる
+$user->readingRecords()->first()->book->title;
+```
+
+4章の `addToShelf` の ④ `Auth::user()->readingRecords()->firstOrNew(...)` も、「ログイン中のユーザーの本棚の中から探す。なければ用意する」という意味。新しく用意した行には、持ち主の番号（`user_id`）が自動で入る。
 
 > **試してみる**
 >
-> `php artisan tinker` で次を 1 行ずつ打つ。
+> `php artisan tinker` で、上から 1 行ずつ打つ。
 >
 > ```php
 > $user = App\Models\User::where('email', 'test@example.com')->first();
-> $user->readingRecords()->count();                         // この人の本棚の冊数
-> $user->readingRecords()->first()->book->title;            // 本棚の 1 冊目のタイトル
+>
+> // 1対多: 番号を自分でたどる → リレーションでたどる（同じタイトルが出る）
+> $record = App\Models\ReadingRecord::where('user_id', $user->id)->first();
+> App\Models\Book::find($record->book_id)->title;
+> $user->readingRecords()->first()->book->title;
+>
+> // 逆向きにもたどれる（本棚の行 → 持ち主）
+> $record->user->name;
+>
+> // 多対多: 感想に付いたタグ → 中間テーブルの中身
+> $post = App\Models\Post::has('tags')->first();
+> $post->tags()->pluck('name');                              // Laravel がたどった結果
+> DB::table('post_tag')->where('post_id', $post->id)->get(); // 中間テーブルには番号だけが入っている
 > ```
+>
+> **注意**: `$user->readingRecords->first()->book` のように、`readingRecords` の後ろの `()` を省くとエラーになることがある。データが多いと遅くなる書き方を、開発中はわざと禁止しているため。上のように `()` を付けて書く。
 
 ---
 
@@ -602,7 +767,10 @@ it('adds a book to the shelf', function () {
 | `wire:model` | 糸 | 入力欄とメモ帳をつなぐ | ビューの中 |
 | `wire:click` | 呼び出しボタン | 押されたら PHP のメソッドを呼ぶ | ビューの中 |
 | モデル | 倉庫係 | データベースの読み書き | `app/Models/` |
-| リレーション | 番号でつながった関係 | `hasMany`（たくさん持っている）、`belongsTo`（〜のもの） | モデルの中 |
+| テーブル | 倉庫の棚 | データベースの中の表。データそのもの | データベース |
+| 1対1 / 1対多 / 多対多 | 人とマイナンバー / お母さんと子ども / 学生と授業 | 2 つのものの「数の関係」 | — |
+| 中間テーブル | 履修の表 | 多対多をつなぐための表 | `post_tag`、`reading_records` |
+| リレーション | 番号でつながった関係 | モデルに書く表どうしのつながり。`hasOne`・`hasMany`・`belongsTo`・`belongsToMany` | モデルの中 |
 | マイグレーション | 棚の設計図 | テーブルの作り方 | `database/migrations/` |
 | Enum | 選択肢の一覧 | 決まった選択肢と表示名 | `app/Enums/` |
 | Policy | 本人確認 | 他人のデータを操作させない | `app/Policies/` |
