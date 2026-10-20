@@ -5,6 +5,8 @@ Laravel + Livewire で作る読書記録 SNS（学習・ポートフォリオ用
 - 設計書: [docs/design.md](docs/design.md)
 - AWS へのデプロイ手順: [docs/aws/step1-deploy.md](docs/aws/step1-deploy.md)
 
+AWS（EC2 + RDS、GitHub Actions から OIDC と SSM でデプロイ）で公開まで確認したあと、費用がかかるため環境は削除しています。`deploy/aws/setup.sh` で再構築、`deploy/aws/teardown.sh` で削除できます。
+
 ## 機能（Phase 1）
 
 - ユーザー登録・ログイン（ユーザー名・自己紹介つき）
